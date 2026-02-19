@@ -14,16 +14,16 @@ def build_dataset(input_path, output_path):
     print("🔀 Shuffling dataset...")
     df = df.sample(frac=1, random_state=42).reset_index(drop=True)
 
-    # Split into two halves
+    # Split
     half = len(df) // 2
-    df_err = df.iloc[:half]      # ERR examples come from original_text
-    df_ok = df.iloc[half:]       # OK examples come from corrected_text
+    df_err = df.iloc[:half]
+    df_ok = df.iloc[half:] 
 
     print(f"📊 Total rows: {len(df)}")
     print(f"➡️ Using {len(df_err)} rows for ERR")
     print(f"➡️ Using {len(df_ok)} rows for OK")
 
-    # Build the two labeled subsets
+    # Build labeled subsets
     err_examples = pd.DataFrame({
         "text": df_err["original_text"],
         "label": 1               # ERR

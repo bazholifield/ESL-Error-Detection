@@ -18,7 +18,7 @@ def load_wikiedits_english(max_examples=10000):
     data = []
     for i, example in enumerate(ds):
         if i < 5:
-            print(example)  # preview
+            print(example)
         if example.get("language") == "english":
             data.append({
                 "original_text": example.get("text"),
@@ -32,7 +32,7 @@ def load_wikiedits_english(max_examples=10000):
     if not data:
         raise RuntimeError("No English examples found in WikiEdits-MultiGEC!")
 
-    # Convert to DataFrame and save to CSV
+    # Convert to df and save to csv
     df = pd.DataFrame(data)
     df.to_csv(csv_path, index=False)
     print(f"✅ Saved {len(df)} English examples to {csv_path}")

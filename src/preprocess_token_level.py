@@ -31,7 +31,7 @@ def build_token_level_dataset(df):
         original = row["original_text"]
         corrected = row["corrected_text"]
 
-        # --- SKIP BAD ROWS ---
+        # skip weird rows
         if not isinstance(original, str) or not isinstance(corrected, str):
             continue
         if original.strip() == "" or corrected.strip() == "":

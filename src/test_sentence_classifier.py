@@ -8,7 +8,7 @@ MODEL_PATH = "../results/results/checkpoint-3000"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, local_files_only=True)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH, local_files_only=True)
 
-# Label mapping
+# Label  - change this later
 LABEL_LIST = ["OK", "ERR"]
 
 # Example sentences
