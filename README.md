@@ -6,8 +6,3 @@ I started working on this project while teaching English in Spain to work on my 
 
 ## Dataset
 - **OmniGEC (WikiEdits-MultiGEC)** — English subset, human-corrected edits from Wikipedia.
-
-## Features
-- Grammar, spelling, and lexical error detection
-- Explanation module for learner feedback based on error type
-- Modular data preprocessing and model pipeline
