@@ -1,43 +1,35 @@
 from datasets import load_dataset
 import pandas as pd
 import os
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
+from config import RAW_DIR, WI_LOCNESS_DATASET
 
-RAW_DIR = "data/raw"
-CSV_FILENAME = "wikiedits_english.csv"
+CSV_FILENAME = "wi_locness.csv"
 
-def load_wikiedits_english(max_examples=10000):
-    """
-    Stream WikiEdits-MultiGEC, filter English examples, and save to CSV.
-    """
+def load_wi_locness(max_examples=10000):
     os.makedirs(RAW_DIR, exist_ok=True)
     csv_path = os.path.join(RAW_DIR, CSV_FILENAME)
 
-    # Stream dataset
-    ds = load_dataset("lang-uk/WikiEdits-MultiGEC", split="train", streaming=True)
+    ds = load_dataset(WI_LOCNESS_DATASET, split="train")
 
     data = []
-    for i, example in enumerate(ds):
-        if i < 5:
-            print(example)
-        if example.get("language") == "english":
-            data.append({
-                "original_text": example.get("text"),
-                "corrected_text": example.get("correction"),
-                "language": "english",
-                "url": example.get("url")
-            })
+    for example in ds:
+        data.append({
+            "original_text": example["input"],
+            "corrected_text": example["output"],
+        })
         if len(data) >= max_examples:
             break
 
     if not data:
-        raise RuntimeError("No English examples found in WikiEdits-MultiGEC!")
+        raise RuntimeError("No examples found in W&I+LOCNESS dataset!")
 
-    # Convert to df and save to csv
     df = pd.DataFrame(data)
     df.to_csv(csv_path, index=False)
-    print(f"✅ Saved {len(df)} English examples to {csv_path}")
+    print(f"Saved {len(df)} examples to {csv_path}")
     return df
 
 
 if __name__ == "__main__":
-    load_wikiedits_english()
+    load_wi_locness()

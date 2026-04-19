@@ -2,6 +2,10 @@ import pandas as pd
 from datasets import Dataset
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
 import numpy as np
+from sklearn.metrics import f1_score, precision_score, recall_score
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from config import RESULTS_DIR
 
 # config block
 MODEL_NAME = "distilbert-base-uncased"
@@ -13,25 +17,18 @@ LABEL_TO_ID = {label: i for i, label in enumerate(LABEL_LIST)}
 # Helper functions (move this to another file later)
 
 def load_dataset(csv_path):
-    """
-    Load CSV and create sentence-level classification dataset.
-    Labels: 0 = OK, 1 = ERR
-    """
     df = pd.read_csv(csv_path)
-    
-    # label sentence as error if not the same as original text
-    df["label"] = (df["original_text"] != df["corrected_text"]).astype(int)
-    
-    # only keep relevant columns
-    ds = Dataset.from_pandas(df[["original_text", "label"]])
-    ds = ds.rename_column("original_text", "text")
+    ds = Dataset.from_pandas(df[["text", "label"]])
     return ds.train_test_split(test_size=0.2)
 
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
     preds = np.argmax(predictions, axis=-1)
     accuracy = (preds == labels).mean()
-    return {"accuracy": accuracy}
+    f1 = f1_score(labels, preds)
+    precision = precision_score(labels, preds)
+    recall = recall_score(labels, preds)
+    return {"accuracy": accuracy, "f1": f1, "precision": precision, "recall": recall}
 
 # train function
 
@@ -52,7 +49,7 @@ def train_sentence_classifier(csv_path="data/processed/sentences.csv"):
     
     # Training args
     args = TrainingArguments(
-        output_dir="./results",
+        output_dir=RESULTS_DIR,
         learning_rate=5e-5,
         per_device_train_batch_size=BATCH_SIZE,
         per_device_eval_batch_size=BATCH_SIZE,

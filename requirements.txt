@@ -1,7 +1,6 @@
 datasets
 transformers
 torch
-spacy
 pandas
 numpy
 scikit-learn

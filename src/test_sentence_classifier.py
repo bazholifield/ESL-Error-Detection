@@ -1,8 +1,11 @@
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
+from config import CHECKPOINT_PATH
 
 # Model checkpoint
-MODEL_PATH = "../results/results/checkpoint-3000"
+MODEL_PATH = CHECKPOINT_PATH
 
 # Load tokenizer and model
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, local_files_only=True)
