@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from spellchecker import SpellChecker
 
 from article_checker import check_articles
-from error_classifier import classify_errors, INCORRECT_FORMS
+from error_classifier import classify_errors, INCORRECT_FORMS, EMOTION_ING_TO_ED
 
 nlp = spacy.load("en_core_web_sm")
 spell = SpellChecker()
@@ -31,18 +31,17 @@ LESSONS = {
 
     "Unnecessary article":
         "Some nouns don't take 'a' or 'an'. Uncountable nouns (advice, information, "
-        "furniture) and proper nouns usually don't need an article — say 'some advice' "
-        "or just 'information'.",
+        "furniture) and proper nouns usually don't need an article — say 'some advice' or just 'information'.",
 
     "Article omission":
-        "This noun probably needs an article. Try adding 'a', 'an', or 'the' before it.",
+        "",  # generated dynamically — uses the span (the noun) to say "did you mean a/an/the X?"
 
     "Wrong article (a/an vs the)":
         "Use 'the' when talking about something specific or unique — especially "
         "with superlatives ('the best') or relative clauses ('the car that I bought').",
 
     "Spelling error":
-        "",  # generated dynamically in _lesson()
+        "",  # generated dynamically
 
     "Subject-verb agreement":
         "The verb must match the subject. 'He/she/it' → verb+s (runs, goes, doesn't). "
@@ -54,9 +53,13 @@ LESSONS = {
         "Use object pronouns (me, him, her, us, them) after verbs and prepositions. "
         "E.g., 'She called me', not 'Her called I'.",
 
+    "Incorrect verb form after auxiliary":
+        "",  # generated dynamically — names the wrong word
+
     "Verb tense error":
-        "Keep verb tenses consistent with the time being described. "
-        "Words like 'today', 'now', and 'currently' signal present tense.",
+        "Keep verb tenses consistent with the time marker in the sentence. "
+        "'Yesterday/last week/ago' → past tense. 'Now/today/currently' → present tense. "
+        "'Tomorrow/next week' → future.",
 
     "Missing -s ending":
         "After number words (two, three, four...), the noun should be plural. "
@@ -71,7 +74,7 @@ LESSONS = {
         "Use only one: 'I don't know anything' or 'I know nothing' — not both together.",
 
     "Incorrect irregular form":
-        "",  # generated dynamically in _lesson()
+        "",  # generated dynamically
 
     "Run-on sentence":
         "This looks like two complete sentences joined with just a comma (a comma splice). "
@@ -79,8 +82,7 @@ LESSONS = {
 
     "Preposition error":
         "This preposition doesn't fit the usual pattern. "
-        "Common pairings: 'interested in', 'good at', 'married to', "
-        "'arrive at/in', 'depend on', 'afraid of'.",
+        "Common pairings: 'interested in', 'good at', 'married to', 'arrive at/in', 'depend on', 'afraid of'.",
 
     "Word order error":
         "Frequency adverbs (always, usually, often, never, sometimes) go before the "
@@ -88,25 +90,53 @@ LESSONS = {
 
     "Misplaced modifier":
         "An opening phrase should describe the subject of the sentence. "
-        "'Running to catch the bus, my bag fell' is unclear — the bag wasn't running. "
-        "Make sure the subject is the one doing the action in the opening phrase.",
+        "'Running to catch the bus, my bag fell' is unclear — the bag wasn't running.",
 
     "Faulty parallelism":
         "Items in a list should use the same grammatical form. "
         "E.g., 'I like reading, writing, and drawing' — not '...and to draw'.",
 
     "Vague pronoun reference":
-        "When there are multiple nouns in a sentence, a pronoun like 'he', 'she', or "
-        "'they' can be ambiguous. Try using the noun itself to make it clear who you mean.",
+        "When there are multiple nouns in a sentence, a pronoun like 'he' or 'they' can be ambiguous. "
+        "Try using the noun itself to make it clear who you mean.",
 
     "Confused similar words":
         "Some words look or sound alike but mean different things. "
-        "Common ones: their/there/they're, your/you're, its/it's, then/than, affect/effect.",
+        "Common ones: your/you're, its/it's, then/than, affect/effect, loose/lose.",
 
     "Adjective/adverb confusion":
-        "Use an adverb (often ending in -ly) to describe a verb, and an adjective to "
-        "describe a noun. E.g., 'She sings beautifully' (not 'beautiful'), "
-        "'It's a quick solution' (not 'quickly').",
+        "Use an adverb (often ending in -ly) to describe a verb, and an adjective to describe a noun. "
+        "E.g., 'She sings beautifully' (not 'beautiful'), 'It's a quick solution' (not 'quickly').",
+
+    "there/their/they're confusion":
+        "",  # generated dynamically — specific to which word was used
+
+    "Comparative/superlative error":
+        "Don't combine 'more/most' with -er/-est endings — that's a double form. "
+        "Say 'bigger' OR 'more big', not 'more bigger'. "
+        "Irregular forms: good → better → best, bad → worse → worst.",
+
+    "Participial adjective confusion":
+        "",  # generated dynamically — names the word and its corrected form
+
+    "Since/for/ago error":
+        "Use 'for' with a duration ('for three years', 'for a week'), "
+        "'since' with a point in time ('since 2010', 'since Monday'), "
+        "and 'ago' with simple past ('three years ago', 'an hour ago').",
+
+    "Doubled subject":
+        "In English, a sentence only needs one subject. Remove either the noun or the pronoun. "
+        "E.g., 'The teacher explained' or 'She explained' — not 'The teacher, she explained'.",
+
+    "Subject ordering":
+        "When listing people including yourself, put yourself last. "
+        "E.g., 'my friend and I went' (not 'I and my friend'), "
+        "'between my friend and me' (not 'between me and my friend').",
+
+    "Infinitive after preposition":
+        "After a preposition, use the gerund (-ing form), not the infinitive (to + verb). "
+        "E.g., 'thinking about moving' (not 'to move'), 'interested in learning' (not 'to learn'), "
+        "'without knowing' (not 'to know').",
 
     "Grammatical error (unclassified)":
         "This sentence may contain a grammatical error that couldn't be automatically identified.",
@@ -114,7 +144,8 @@ LESSONS = {
 
 
 def _lesson(error_type: str, span: str) -> str:
-    """Return the lesson for an error, with dynamic text for spelling/irregular forms."""
+    """Return the lesson for an error. Dynamic for types where the span changes the message."""
+
     if error_type == "Spelling error":
         correction = spell.correction(span)
         if correction and correction.lower() != span.lower():
@@ -127,18 +158,59 @@ def _lesson(error_type: str, span: str) -> str:
             return f"'{span}' is not the standard form. Use '{correction}' instead."
         return f"'{span}' may be an incorrect verb or noun form."
 
+    if error_type == "Article omission":
+        return (
+            f"'{span}' seems to be missing a determiner. "
+            f"Did you mean 'a {span}', 'an {span}', or 'the {span}'?"
+        )
+
+    if error_type == "Incorrect verb form after auxiliary":
+        return (
+            f"After 'do/does/did', always use the base (infinitive) form of the verb. "
+            f"'{span}' should be its base form here. "
+            f"E.g., 'didn't go' (not 'went'), 'doesn't run' (not 'runs')."
+        )
+
+    if error_type == "there/their/they're confusion":
+        lower = span.lower()
+        if lower == "their":
+            return (
+                "'Their' is possessive — it means 'belonging to them' (their house, their idea). "
+                "Did you mean 'they're' (= they are) or 'there' (a place, or 'there is/are')?"
+            )
+        if lower == "there":
+            return (
+                "'There' is used for locations or in 'there is/are'. "
+                "Did you mean 'their' (possessive — belonging to them) or 'they're' (= they are)?"
+            )
+        return (
+            "'They're' is a contraction of 'they are'. "
+            "Did you mean 'their' (possessive) or 'there' (a place or 'there is/are')?"
+        )
+
+    if error_type == "Participial adjective confusion":
+        ed_form = EMOTION_ING_TO_ED.get(span.lower(), '')
+        if ed_form:
+            return (
+                f"'-ing' adjectives describe what causes a feeling, '-ed' adjectives describe how someone feels. "
+                f"Since the subject is a person experiencing the feeling, try '{ed_form}' instead of '{span}'. "
+                f"E.g., 'The lesson was {span}' (it caused the feeling) vs 'I was {ed_form}' (I felt it)."
+            )
+        return (
+            "'-ing' adjectives describe what causes a feeling (boring film), "
+            "'-ed' adjectives describe how someone feels (bored person)."
+        )
+
     return LESSONS.get(error_type, '')
 
 
 def _annotate_tokens(doc, errors: list[Error]) -> list[dict]:
     """Map errors onto spaCy tokens so the frontend can highlight individual words."""
-    # group errors by span text — multiple errors can share the same word
     span_errors: dict[str, list[Error]] = {}
     for err in errors:
         if err.span:
             span_errors.setdefault(err.span, []).append(err)
 
-    # find the first token index matching each span text
     span_token_idx: dict[str, int] = {}
     for i, tok in enumerate(doc):
         if tok.text in span_errors and tok.text not in span_token_idx:
@@ -160,6 +232,18 @@ def _annotate_tokens(doc, errors: list[Error]) -> list[dict]:
     ]
 
 
+def _merge_sentences(sents: list[str]) -> list[str]:
+    """Merge sentences that start with a coordinating conjunction into the previous one."""
+    merged = []
+    for s in sents:
+        first_word = s.split()[0].lower() if s.split() else ''
+        if merged and first_word in ('and', 'but', 'or', 'so', 'yet', 'nor'):
+            merged[-1] = merged[-1].rstrip() + ' ' + s
+        else:
+            merged.append(s)
+    return merged
+
+
 def analyze(text: str, tokenizer, model, threshold: float = 0.25) -> list[dict]:
     """
     Analyze a sentence or paragraph.
@@ -167,11 +251,9 @@ def analyze(text: str, tokenizer, model, threshold: float = 0.25) -> list[dict]:
       [{'sentence': str, 'errors': list[Error], 'tokens': list[dict]}, ...]
     """
     doc = nlp(text)
+    raw_sents = [s.text.strip() for s in doc.sents if s.text.strip()]
     results = []
-    for sent in doc.sents:
-        sent_text = sent.text.strip()
-        if not sent_text:
-            continue
+    for sent_text in _merge_sentences(raw_sents):
         errors, tokens = _analyze_sentence(sent_text, tokenizer, model, threshold)
         results.append({'sentence': sent_text, 'errors': errors, 'tokens': tokens})
     return results
@@ -189,10 +271,8 @@ def _analyze_sentence(text: str, tokenizer, model, threshold: float) -> tuple[li
                 seen.add(key)
                 errors.append(Error(error_type, span, _lesson(error_type, span)))
 
-    # article checks always run — high precision, no model needed
     add(check_articles(text))
 
-    # binary model decides whether to run the full classifier
     inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=128)
     with torch.no_grad():
         logits = model(**inputs).logits
@@ -200,10 +280,7 @@ def _analyze_sentence(text: str, tokenizer, model, threshold: float) -> tuple[li
 
     if prob_err >= threshold:
         seen_types = {e.error_type for e in errors}
-        add([
-            (t, s) for t, s in classify_errors(text)
-            if t not in seen_types
-        ])
+        add([(t, s) for t, s in classify_errors(text) if t not in seen_types])
 
     doc = nlp(text)
     tokens = _annotate_tokens(doc, errors)
