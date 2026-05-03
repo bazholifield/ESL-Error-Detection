@@ -118,6 +118,22 @@ OBJECT_PRONOUNS  = {'me', 'him', 'her', 'us', 'them'}
 SUBJECT_PRONOUNS = {'i', 'he', 'she', 'we', 'they'}
 FREQ_ADVERBS     = {'always', 'usually', 'often', 'sometimes', 'rarely', 'seldom', 'never'}
 
+# nouns that legitimately appear without articles in common phrases
+ARTICLE_EXEMPT = {
+    'home', 'work', 'school', 'college', 'university', 'hospital', 'church',
+    'bed', 'town', 'sea', 'prison', 'court', 'class', 'lunch', 'breakfast',
+    'dinner', 'time', 'life', 'love', 'nature', 'society', 'language',
+    'help', 'fun', 'trouble', 'difficulty', 'permission', 'control',
+}
+
+# spelled-out numbers that like_num misses
+NUMBER_WORDS = {
+    'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+    'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty',
+    'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred', 'thousand',
+}
+
 # ── individual checks ──────────────────────────────────────────────────────────
 
 def check_spelling(doc):
@@ -135,19 +151,33 @@ def check_subject_verb_agreement(doc):
         if tok.dep_ == 'nsubj' and tok.head.pos_ == 'VERB':
             subj = tok.text.lower()
             verb = tok.head
-            # 3rd person singular subjects need VBZ
-            if subj in ('he', 'she', 'it') or tok.tag_ == 'NN':
-                if verb.tag_ == 'VBP':
-                    return SVA
-            # plural/1st/2nd person subjects should not use VBZ
-            if subj in ('i', 'we', 'they', 'you') or tok.tag_ == 'NNS':
-                if verb.tag_ == 'VBZ':
-                    return SVA
+            is_3sg = subj in ('he', 'she', 'it') or tok.tag_ == 'NN'
+            is_plural = subj in ('i', 'we', 'they', 'you') or tok.tag_ == 'NNS'
+
+            # check main verb
+            if is_3sg and verb.tag_ == 'VBP':
+                return SVA
+            if is_plural and verb.tag_ == 'VBZ':
+                return SVA
+
             # was/were with wrong subject
             if subj in ('they', 'we', 'you') and verb.lemma_ == 'be' and verb.text.lower() == 'was':
                 return SVA
             if subj in ('he', 'she', 'it') and verb.lemma_ == 'be' and verb.text.lower() == 'were':
                 return SVA
+
+            # check auxiliaries (catches "she don't", "they doesn't", "they was sleeping")
+            for child in verb.children:
+                if child.dep_ in ('aux', 'auxpass') and child.lemma_ in ('do', 'have', 'be'):
+                    if is_3sg and child.tag_ == 'VBP':
+                        return SVA
+                    if is_plural and child.tag_ == 'VBZ':
+                        return SVA
+                    # was/were mismatch when be is auxiliary (e.g. "they was sleeping")
+                    if is_plural and child.lemma_ == 'be' and child.text.lower() == 'was':
+                        return SVA
+                    if is_3sg and child.lemma_ == 'be' and child.text.lower() == 'were':
+                        return SVA
     return None
 
 
@@ -187,13 +217,10 @@ def check_verb_tense(doc):
 def check_missing_s(doc):
     tokens = list(doc)
     for i, tok in enumerate(tokens[:-1]):
-        if tok.like_num:
-            try:
-                val = float(tok.text.replace(',', ''))
-                if val != 1 and tokens[i + 1].tag_ == 'NN':
-                    return MISSING_S
-            except ValueError:
-                pass
+        is_num = tok.like_num or tok.text.lower() in NUMBER_WORDS
+        is_one = tok.text in ('1', 'one') or (tok.like_num and tok.text == '1')
+        if is_num and not is_one and tokens[i + 1].tag_ == 'NN':
+            return MISSING_S
     return None
 
 
@@ -214,14 +241,22 @@ def check_double_negative(doc):
 
 
 def check_article_omission(doc):
-    # singular countable noun in object/subject position with no determiner
     for tok in doc:
-        if tok.tag_ == 'NN' and tok.dep_ in ('dobj', 'pobj') and tok.lemma_ not in UNCOUNTABLE_NOUNS:
-            has_det = any(c.dep_ == 'det' or c.dep_ == 'poss' for c in tok.children)
+        if (
+            tok.tag_ == 'NN'
+            and tok.pos_ != 'PRON'
+            and tok.dep_ in ('dobj', 'pobj')
+            and tok.lemma_ not in UNCOUNTABLE_NOUNS
+            and tok.lemma_ not in ARTICLE_EXEMPT
+        ):
+            has_det = any(c.dep_ in ('det', 'poss', 'nummod') for c in tok.children)
             has_adj_with_det = any(
                 any(c2.dep_ == 'det' for c2 in c.children)
                 for c in tok.children if c.dep_ == 'amod'
             )
+            # also skip if a preceding token in the same phrase is a determiner
+            if tok.i > 0 and doc[tok.i - 1].dep_ == 'det':
+                continue
             if not has_det and not has_adj_with_det:
                 return ART_OMISSION
     return None
@@ -254,7 +289,13 @@ def check_run_on(doc):
             left  = tokens[:i]
             right = tokens[i + 1:]
             right_starts_conj = right[0].pos_ == 'CCONJ' if right else False
+            # skip if left clause is subordinate (sconj, mark, advcl, relcl)
+            left_is_subordinate = any(
+                t.dep_ in ('mark', 'advcl', 'relcl') or t.pos_ == 'SCONJ'
+                for t in left
+            )
             if (
+                not left_is_subordinate and
                 any(t.pos_ == 'VERB' and t.dep_ != 'aux' for t in left) and
                 any(t.dep_ == 'nsubj' for t in left) and
                 any(t.pos_ == 'VERB' and t.dep_ != 'aux' for t in right) and
@@ -319,29 +360,36 @@ def check_vague_pronoun(doc):
 
 
 def check_similar_words(doc):
-    # flag common confused words used in the wrong grammatical role
-    errors = {
-        # (word, expected_pos_when_wrong)
-        ('their',   'ADV'):  SIMILAR_WORDS,   # their used as adverb → should be there
-        ('there',   'DET'):  SIMILAR_WORDS,   # there used as determiner → should be their
-        ("they're", 'DET'):  SIMILAR_WORDS,
-        ('your',    'ADV'):  SIMILAR_WORDS,
-        ("you're",  'DET'):  SIMILAR_WORDS,
-        ('its',     'VERB'): SIMILAR_WORDS,
-        ("it's",    'DET'):  SIMILAR_WORDS,
-        ('then',    'SCONJ'): SIMILAR_WORDS,  # then used in comparison → should be than
-        ('than',    'ADV'):  SIMILAR_WORDS,   # than used as time adverb → should be then
-        ('loose',   'VERB'): SIMILAR_WORDS,   # loose used as verb → should be lose
-        ('lose',    'ADJ'):  SIMILAR_WORDS,
-        ('advice',  'VERB'): SIMILAR_WORDS,
-        ('advise',  'NOUN'): SIMILAR_WORDS,
-        ('affect',  'NOUN'): SIMILAR_WORDS,
-        ('effect',  'VERB'): SIMILAR_WORDS,
+    # POS-based confusion checks
+    pos_errors = {
+        ('their',   'ADV'):   SIMILAR_WORDS,
+        ('there',   'DET'):   SIMILAR_WORDS,
+        ("they're", 'DET'):   SIMILAR_WORDS,
+        ('your',    'ADV'):   SIMILAR_WORDS,
+        ("you're",  'DET'):   SIMILAR_WORDS,
+        ('its',     'VERB'):  SIMILAR_WORDS,
+        ("it's",    'DET'):   SIMILAR_WORDS,
+        ('then',    'SCONJ'): SIMILAR_WORDS,
+        ('than',    'ADV'):   SIMILAR_WORDS,
+        ('loose',   'VERB'):  SIMILAR_WORDS,
+        ('lose',    'ADJ'):   SIMILAR_WORDS,
+        ('advice',  'VERB'):  SIMILAR_WORDS,
+        ('advise',  'NOUN'):  SIMILAR_WORDS,
+        ('affect',  'NOUN'):  SIMILAR_WORDS,
+        ('effect',  'VERB'):  SIMILAR_WORDS,
     }
     for tok in doc:
-        key = (tok.text.lower(), tok.pos_)
-        if key in errors:
-            return errors[key]
+        if (tok.text.lower(), tok.pos_) in pos_errors:
+            return SIMILAR_WORDS
+
+    # "Their/Your going..." → likely "They're/You're going..."
+    # spaCy may parse as poss or nsubj depending on context
+    for tok in doc:
+        if tok.text.lower() in ('their', 'your') and tok.dep_ in ('poss', 'nsubj'):
+            head = tok.head
+            if head.tag_ == 'VBG' and head.dep_ == 'ROOT':
+                return SIMILAR_WORDS
+
     return None
 
 
