@@ -37,6 +37,7 @@ DOUBLED_SUBJ    = "Doubled subject"
 SUBJ_ORDER      = "Subject ordering"
 NEGATED_VERB    = "Incorrect verb form after auxiliary"
 INF_AFTER_PREP  = "Infinitive after preposition"
+GERUND_VERB     = "Gerund required after verb"
 UNKNOWN         = "Grammatical error (unclassified)"
 
 # ── word lists ─────────────────────────────────────────────────────────────────
@@ -145,6 +146,13 @@ TIME_NOUNS_PERIOD = {
     'semester', 'term', 'summer', 'winter', 'spring', 'fall', 'autumn',
 }
 
+# verbs that require a gerund (-ing) complement, not a bare infinitive
+GERUND_VERBS = {
+    'stop', 'finish', 'keep', 'enjoy', 'avoid', 'consider', 'suggest',
+    'practice', 'quit', 'miss', 'risk', 'delay', 'postpone', 'deny',
+    'resist', 'recall', 'admit', 'mind', 'recommend', 'give',
+}
+
 # prepositions that require a gerund (-ing), not an infinitive
 GERUND_PREPS = {
     'about', 'in', 'of', 'at', 'for', 'without', 'before', 'after',
@@ -163,35 +171,60 @@ def check_spelling(doc) -> list[tuple[str, str]]:
     return [(SPELLING, w) for w in spell.unknown(words)]
 
 
+def _sva_check_verb(verb, is_3sg: bool, is_plural: bool) -> list[tuple[str, str]]:
+    """Return SVA errors for a verb and its auxiliaries given subject agreement info."""
+    results = []
+    if is_3sg and verb.tag_ == 'VBP':
+        results.append((SVA, verb.text))
+    elif is_plural and verb.tag_ == 'VBZ':
+        results.append((SVA, verb.text))
+    elif is_plural and verb.lemma_ == 'be' and verb.text.lower() == 'was':
+        results.append((SVA, verb.text))
+    elif is_3sg and verb.lemma_ == 'be' and verb.text.lower() == 'were':
+        results.append((SVA, verb.text))
+    elif is_3sg and verb.tag_ == 'VB':
+        # bare form in main clause with 3sg subject (e.g. "she speak") — missing -s
+        has_modal_or_do = any(
+            c.dep_ == 'aux' and (c.tag_ == 'MD' or c.lemma_ == 'do')
+            for c in verb.children
+        )
+        if not has_modal_or_do:
+            results.append((SVA, verb.text))
+    for child in verb.children:
+        if child.dep_ in ('aux', 'auxpass') and child.lemma_ in ('do', 'have', 'be'):
+            if is_3sg and child.tag_ == 'VBP':
+                results.append((SVA, child.text))
+            elif is_plural and child.tag_ == 'VBZ':
+                results.append((SVA, child.text))
+            elif is_plural and child.lemma_ == 'be' and child.text.lower() == 'was':
+                results.append((SVA, child.text))
+            elif is_3sg and child.lemma_ == 'be' and child.text.lower() == 'were':
+                results.append((SVA, child.text))
+    return results
+
+
 def check_subject_verb_agreement(doc) -> list[tuple[str, str]]:
     results = []
     for tok in doc:
-        if tok.dep_ != 'nsubj' or tok.head.pos_ != 'VERB':
+        if tok.dep_ != 'nsubj' or tok.head.pos_ not in ('VERB', 'AUX'):
             continue
         subj = tok.text.lower()
         verb = tok.head
-        is_3sg    = subj in ('he', 'she', 'it') or tok.tag_ == 'NN'
-        is_plural = subj in ('i', 'we', 'they', 'you') or tok.tag_ == 'NNS'
+        # compound subject ("Me and my cousin") → treat as plural
+        is_compound = any(c.dep_ == 'conj' for c in tok.children)
+        is_3sg    = (subj in ('he', 'she', 'it') or tok.tag_ == 'NN') and not is_compound
+        is_plural = subj in ('i', 'we', 'they', 'you') or tok.tag_ == 'NNS' or is_compound
 
-        if is_3sg and verb.tag_ == 'VBP':
-            results.append((SVA, verb.text)); continue
-        if is_plural and verb.tag_ == 'VBZ':
-            results.append((SVA, verb.text)); continue
-        if subj in ('they', 'we', 'you') and verb.lemma_ == 'be' and verb.text.lower() == 'was':
-            results.append((SVA, verb.text)); continue
-        if subj in ('he', 'she', 'it') and verb.lemma_ == 'be' and verb.text.lower() == 'were':
-            results.append((SVA, verb.text)); continue
+        results.extend(_sva_check_verb(verb, is_3sg, is_plural))
 
-        for child in verb.children:
-            if child.dep_ in ('aux', 'auxpass') and child.lemma_ in ('do', 'have', 'be'):
-                if is_3sg and child.tag_ == 'VBP':
-                    results.append((SVA, child.text))
-                elif is_plural and child.tag_ == 'VBZ':
-                    results.append((SVA, child.text))
-                elif is_plural and child.lemma_ == 'be' and child.text.lower() == 'was':
-                    results.append((SVA, child.text))
-                elif is_3sg and child.lemma_ == 'be' and child.text.lower() == 'were':
-                    results.append((SVA, child.text))
+        # also check conjoined verbs that inherit this subject (elided subject)
+        for conj_verb in verb.children:
+            if conj_verb.dep_ != 'conj' or conj_verb.pos_ not in ('VERB', 'AUX'):
+                continue
+            if any(c.dep_ == 'nsubj' for c in conj_verb.children):
+                continue  # has its own subject
+            results.extend(_sva_check_verb(conj_verb, is_3sg, is_plural))
+
     return results
 
 
@@ -282,7 +315,10 @@ def check_double_negative(doc) -> list[tuple[str, str]]:
     has_neg = any(tok.dep_ == 'neg' for tok in doc)
     if not has_neg:
         return []
-    return [(DOUBLE_NEG, tok.text) for tok in doc if tok.text.lower() in neg_indefinites]
+    results = [(DOUBLE_NEG, tok.text) for tok in doc if tok.text.lower() in neg_indefinites]
+    # also catch "no" used as a determiner alongside a separate negation ("didn't have no money")
+    results += [(DOUBLE_NEG, tok.text) for tok in doc if tok.text.lower() == 'no' and tok.dep_ == 'det']
+    return results
 
 
 def check_incorrect_forms(doc) -> list[tuple[str, str]]:
@@ -317,7 +353,7 @@ def check_preposition(doc) -> list[tuple[str, str]]:
     for i, tok in enumerate(tokens[:-1]):
         pair = (tok.lemma_.lower(), tokens[i + 1].text.lower())
         if pair in PREPOSITION_ERRORS:
-            results.append((PREPOSITION, tokens[i + 1].text))
+            results.append((PREPOSITION, tok.text))
     return results
 
 
@@ -455,6 +491,8 @@ def check_participial_adj(doc) -> list[tuple[str, str]]:
     adjectives with a personal pronoun subject — usually should be the '-ed' form.
     E.g., 'I am very interesting' → should be 'interested'.
     Handles elided subjects in conjoined clauses: 'I went and was very surprising'.
+    For third-person pronouns, only flags when the adj has an experiencer prep
+    ('in', 'about') to avoid false positives like 'the cashier was boring'.
     """
     results = []
     personal = {'i', 'he', 'she', 'we', 'they'}
@@ -467,11 +505,21 @@ def check_participial_adj(doc) -> list[tuple[str, str]]:
             continue
         verb = tok.head
         subj = next((c for c in verb.children if c.dep_ == 'nsubj'), None)
-        # elided subject: verb is conjoined — inherit subject from the governing verb
         if subj is None and verb.dep_ == 'conj':
             subj = next((c for c in verb.head.children if c.dep_ == 'nsubj'), None)
-        if subj is not None and subj.text.lower() in personal:
+        if subj is None or subj.text.lower() not in personal:
+            continue
+        if subj.text.lower() == 'i':
             results.append((PARTICIPIAL_ADJ, tok.text))
+        else:
+            # for he/she/we/they only flag when there's an experiencer preposition
+            # ('interested in X', 'excited about X') — reduces false positives
+            has_experiencer_prep = any(
+                c.dep_ == 'prep' and c.text.lower() in ('in', 'about')
+                for c in tok.children
+            )
+            if has_experiencer_prep:
+                results.append((PARTICIPIAL_ADJ, tok.text))
     return results
 
 
@@ -548,6 +596,20 @@ def check_subject_ordering(doc) -> list[tuple[str, str]]:
     return results
 
 
+def check_gerund_after_verb(doc) -> list[tuple[str, str]]:
+    """
+    Catches bare infinitive where a gerund is required:
+    'stop worry' → 'stop worrying', 'enjoy swim' → 'enjoy swimming'.
+    """
+    return [
+        (GERUND_VERB, tok.text)
+        for tok in doc
+        if tok.dep_ == 'xcomp'
+        and tok.tag_ == 'VB'
+        and tok.head.lemma_.lower() in GERUND_VERBS
+    ]
+
+
 def check_infinitive_after_prep(doc) -> list[tuple[str, str]]:
     """
     Catches infinitive used after a preposition that requires a gerund:
@@ -597,6 +659,7 @@ CHECKS = [
     check_doubled_subject,
     check_subject_ordering,
     check_infinitive_after_prep,
+    check_gerund_after_verb,
 ]
 
 

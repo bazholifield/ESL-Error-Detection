@@ -138,6 +138,11 @@ LESSONS = {
         "E.g., 'thinking about moving' (not 'to move'), 'interested in learning' (not 'to learn'), "
         "'without knowing' (not 'to know').",
 
+    "Gerund required after verb":
+        "Some verbs must be followed by the -ing form, not a base verb. "
+        "E.g., 'stop worrying' (not 'stop worry'), 'enjoy swimming' (not 'enjoy swim'), "
+        "'avoid making' (not 'avoid make'), 'keep trying' (not 'keep try').",
+
     "Grammatical error (unclassified)":
         "This sentence may contain a grammatical error that couldn't be automatically identified.",
 }
