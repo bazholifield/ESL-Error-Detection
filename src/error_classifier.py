@@ -632,28 +632,18 @@ def check_infinitive_after_prep(doc) -> list[tuple[str, str]]:
     return results
 
 
-# ── main pipeline ─────────────────────────────────────────────────────────────
-
-CHECKS = [
+# ── tiered check lists ────────────────────────────────────────────────────────
+# Tier 2 (prob_err ≥ 0.35): high-precision, pattern-based rules with low false-positive risk.
+CHECKS_TIER2 = [
     check_spelling,
-    check_subject_verb_agreement,
-    check_pronoun_case,
+    check_incorrect_forms,
+    check_double_negative,
     check_negated_verb,
-    check_verb_tense,
     check_missing_s,
     check_present_continuous,
-    check_double_negative,
-    check_incorrect_forms,
-    check_run_on,
-    check_preposition,
-    check_word_order,
-    check_modifier,
-    check_parallelism,
-    check_vague_pronoun,
-    check_there_their_theyre,
-    check_similar_words,
-    check_adj_adv,
     check_comparative,
+    check_pronoun_case,
+    check_there_their_theyre,
     check_participial_adj,
     check_since_for_ago,
     check_doubled_subject,
@@ -662,14 +652,37 @@ CHECKS = [
     check_gerund_after_verb,
 ]
 
+# Tier 3 (prob_err ≥ 0.55): context-dependent rules with higher false-positive risk.
+# Only run when the model is fairly confident there's an error.
+CHECKS_TIER3 = [
+    check_subject_verb_agreement,
+    check_verb_tense,
+    check_run_on,
+    check_preposition,
+    check_word_order,
+    check_modifier,
+    check_parallelism,
+    check_vague_pronoun,
+    check_similar_words,
+    check_adj_adv,
+]
 
-def classify_errors(sentence: str) -> list[tuple[str, str]]:
+TIER2_THRESHOLD = 0.35
+TIER3_THRESHOLD = 0.55
+
+
+def classify_errors_tiered(sentence: str, prob_err: float) -> list[tuple[str, str]]:
     """
-    Returns (error_type, span) pairs for all errors found in a sentence.
-    Returns [(UNKNOWN, '')] if no specific rule matches.
+    Run rule-based checks appropriate for the model's confidence level.
+    Returns (error_type, span) pairs, or [(UNKNOWN, '')] if nothing specific fires.
     """
+    if prob_err < TIER2_THRESHOLD:
+        return []
     doc = nlp(sentence)
     errors = []
-    for check in CHECKS:
+    for check in CHECKS_TIER2:
         errors.extend(check(doc))
+    if prob_err >= TIER3_THRESHOLD:
+        for check in CHECKS_TIER3:
+            errors.extend(check(doc))
     return errors if errors else [(UNKNOWN, '')]

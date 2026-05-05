@@ -6,8 +6,6 @@ from config import CHECKPOINT_PATH
 from pipeline import analyze
 from error_classifier import UNKNOWN
 
-THRESHOLD = 0.25
-
 app = Flask(__name__)
 
 tokenizer = AutoTokenizer.from_pretrained(CHECKPOINT_PATH, local_files_only=True)
@@ -25,7 +23,7 @@ def analyze_route():
     if not text:
         return jsonify({'error': 'No text provided'}), 400
 
-    results = analyze(text, tokenizer, _model, THRESHOLD)
+    results = analyze(text, tokenizer, _model)
 
     sentences = []
     total_errors = 0

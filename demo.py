@@ -6,8 +6,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 from config import CHECKPOINT_PATH
 from pipeline import analyze
 
-THRESHOLD = 0.25  # low threshold = high recall; rule-based classifier handles false positives
-
 def load_model(checkpoint=CHECKPOINT_PATH):
     tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
     model = AutoModelForSequenceClassification.from_pretrained(checkpoint, local_files_only=True)
@@ -52,7 +50,7 @@ def main():
     tokenizer, model = load_model(args.checkpoint)
 
     if args.text:
-        results = analyze(args.text, tokenizer, model, THRESHOLD)
+        results = analyze(args.text, tokenizer, model)
         display(results)
     else:
         print("ESL Error Detector — type a sentence or paragraph, or 'quit' to exit.")

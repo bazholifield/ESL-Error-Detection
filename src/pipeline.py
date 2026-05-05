@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from spellchecker import SpellChecker
 
 from article_checker import check_articles
-from error_classifier import classify_errors, INCORRECT_FORMS, EMOTION_ING_TO_ED
+from error_classifier import classify_errors_tiered, INCORRECT_FORMS, EMOTION_ING_TO_ED
 
 nlp = spacy.load("en_core_web_sm")
 spell = SpellChecker()
@@ -249,7 +249,7 @@ def _merge_sentences(sents: list[str]) -> list[str]:
     return merged
 
 
-def analyze(text: str, tokenizer, model, threshold: float = 0.25) -> list[dict]:
+def analyze(text: str, tokenizer, model) -> list[dict]:
     """
     Analyze a sentence or paragraph.
     Returns a list of per-sentence dicts:
@@ -259,12 +259,12 @@ def analyze(text: str, tokenizer, model, threshold: float = 0.25) -> list[dict]:
     raw_sents = [s.text.strip() for s in doc.sents if s.text.strip()]
     results = []
     for sent_text in _merge_sentences(raw_sents):
-        errors, tokens = _analyze_sentence(sent_text, tokenizer, model, threshold)
+        errors, tokens = _analyze_sentence(sent_text, tokenizer, model)
         results.append({'sentence': sent_text, 'errors': errors, 'tokens': tokens})
     return results
 
 
-def _analyze_sentence(text: str, tokenizer, model, threshold: float) -> tuple[list[Error], list[dict]]:
+def _analyze_sentence(text: str, tokenizer, model) -> tuple[list[Error], list[dict]]:
     """Run all checks on a single sentence. Returns (errors, token_annotations)."""
     errors: list[Error] = []
     seen: set[tuple[str, str]] = set()
@@ -283,10 +283,8 @@ def _analyze_sentence(text: str, tokenizer, model, threshold: float) -> tuple[li
         logits = model(**inputs).logits
     prob_err = F.softmax(logits, dim=-1)[0, 1].item()
 
-    if prob_err >= threshold:
-        seen_types = {e.error_type for e in errors}
-        add([(t, s) for t, s in classify_errors(text) if t not in seen_types])
+    seen_types = {e.error_type for e in errors}
+    add([(t, s) for t, s in classify_errors_tiered(text, prob_err) if t not in seen_types])
 
     doc = nlp(text)
-    tokens = _annotate_tokens(doc, errors)
-    return errors, tokens
+    return errors, _annotate_tokens(doc, errors)
