@@ -40,6 +40,8 @@ INF_AFTER_PREP  = "Infinitive after preposition"
 GERUND_VERB     = "Gerund required after verb"
 INF_FORM        = "Wrong verb form after 'to'"
 MODAL_HAVE      = "Modal + 'had' error"
+WRONG_REL_PRON  = "Wrong relative pronoun"
+HAVE_PART       = "Missing past participle"
 UNKNOWN         = "Grammatical error (unclassified)"
 
 # ── word lists ─────────────────────────────────────────────────────────────────
@@ -148,6 +150,12 @@ TIME_NOUNS_PERIOD = {
     'semester', 'term', 'summer', 'winter', 'spring', 'fall', 'autumn',
 }
 
+# causative verbs whose object takes a bare infinitive complement
+CAUSATIVE_VERBS = {'make', 'let', 'have', 'help'}
+
+# causative/resultative verbs that use "to" + infinitive (catches "to becoming")
+CAUSATIVE_INF_VERBS = {'cause', 'allow', 'force', 'enable', 'help', 'get', 'compel', 'encourage'}
+
 # verbs that require a gerund (-ing) complement, not a bare infinitive
 GERUND_VERBS = {
     'stop', 'finish', 'keep', 'enjoy', 'avoid', 'consider', 'suggest',
@@ -210,8 +218,18 @@ def check_subject_verb_agreement(doc) -> list[tuple[str, str]]:
     for tok in doc:
         if tok.dep_ != 'nsubj' or tok.head.pos_ not in ('VERB', 'AUX'):
             continue
-        subj = tok.text.lower()
         verb = tok.head
+
+        # relative pronoun subject (which/that) — inherit number from antecedent noun
+        if tok.tag_ == 'WDT' and verb.dep_ == 'relcl':
+            antecedent = verb.head
+            if antecedent.tag_ in ('NN', 'NNP'):
+                results.extend(_sva_check_verb(verb, is_3sg=True, is_plural=False))
+            elif antecedent.tag_ in ('NNS', 'NNPS'):
+                results.extend(_sva_check_verb(verb, is_3sg=False, is_plural=True))
+            continue
+
+        subj = tok.text.lower()
         # compound subject ("Me and my cousin") → treat as plural
         is_compound = any(c.dep_ == 'conj' for c in tok.children)
         is_3sg    = (subj in ('he', 'she', 'it') or tok.tag_ == 'NN') and not is_compound
@@ -628,13 +646,23 @@ def check_infinitive_form(doc) -> list[tuple[str, str]]:
     """
     Catches wrong verb form directly after 'to' (infinitive marker):
     'to accepts' → 'to accept', 'to going' → 'to go'.
-    Looks for verbs whose TO aux child is present but the verb tag is not VB.
+    Also catches VBG as pcomp of ADP 'to' after causative verbs:
+    'causing everyone to becoming' → 'to become'.
     """
     results = []
     for tok in doc:
         if tok.pos_ != 'VERB' or tok.tag_ == 'VB':
             continue
         if any(c.tag_ == 'TO' and c.dep_ == 'aux' for c in tok.children):
+            results.append((INF_FORM, tok.text))
+    # catch ADP "to" + VBG pcomp after causative/resultative verbs
+    for tok in doc:
+        if tok.tag_ != 'VBG' or tok.dep_ != 'pcomp':
+            continue
+        prep = tok.head
+        if prep.pos_ != 'ADP' or prep.text.lower() != 'to':
+            continue
+        if prep.head.lemma_.lower() in CAUSATIVE_INF_VERBS:
             results.append((INF_FORM, tok.text))
     return results
 
@@ -668,6 +696,57 @@ def check_gerund_after_verb(doc) -> list[tuple[str, str]]:
         and tok.tag_ == 'VB'
         and tok.head.lemma_.lower() in GERUND_VERBS
     ]
+
+
+def check_wrong_rel_pronoun(doc) -> list[tuple[str, str]]:
+    """
+    Catches 'what' used as a relative pronoun after an explicit noun antecedent:
+    'the items what I bought' → should be 'that' or 'which'.
+    Free relative clauses ('what I want is...') are not flagged.
+    """
+    results = []
+    for tok in doc:
+        if tok.text.lower() != 'what' or tok.tag_ != 'WP':
+            continue
+        if tok.dep_ not in ('nsubj', 'dobj', 'pobj', 'attr'):
+            continue
+        verb = tok.head
+        if verb.dep_ == 'relcl' and verb.head.pos_ in ('NOUN', 'PROPN'):
+            results.append((WRONG_REL_PRON, tok.text))
+    return results
+
+
+def check_have_participle(doc) -> list[tuple[str, str]]:
+    """
+    Catches bare VB where VBN (past participle) is needed after have/has/had:
+    'prices has change' → 'prices have changed'.
+    Excludes 'have to + VB' (obligation) constructions.
+    """
+    results = []
+    for tok in doc:
+        if tok.lemma_ != 'have' or tok.tag_ not in ('VBZ', 'VBP', 'VBD'):
+            continue
+        for child in tok.children:
+            if child.dep_ == 'xcomp' and child.tag_ == 'VB':
+                has_to = any(c.tag_ == 'TO' for c in child.children)
+                if not has_to:
+                    results.append((HAVE_PART, child.text))
+    return results
+
+
+def check_causative_form(doc) -> list[tuple[str, str]]:
+    """
+    Catches inflected verb (VBZ) in the bare-infinitive slot after causative verbs:
+    'make me feels' → 'make me feel'.
+    """
+    results = []
+    for tok in doc:
+        if tok.lemma_.lower() not in CAUSATIVE_VERBS:
+            continue
+        for child in tok.children:
+            if child.dep_ in ('ccomp', 'xcomp') and child.tag_ == 'VBZ':
+                results.append((INF_FORM, child.text))
+    return results
 
 
 def check_infinitive_after_prep(doc) -> list[tuple[str, str]]:
@@ -713,6 +792,9 @@ CHECKS_TIER2 = [
     check_infinitive_form,
     check_modal_have,
     check_gerund_after_verb,
+    check_wrong_rel_pronoun,
+    check_have_participle,
+    check_causative_form,
 ]
 
 # Tier 3 (prob_err ≥ 0.55): context-dependent rules with higher false-positive risk.

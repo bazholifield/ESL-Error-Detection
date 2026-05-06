@@ -152,6 +152,16 @@ LESSONS = {
         "After modal verbs (should, would, could, might), use 'have' not 'had'. "
         "E.g., 'should have gone' (not 'should had gone'), 'would have known' (not 'would had known').",
 
+    "Wrong relative pronoun":
+        "Use 'that' or 'which' to introduce a relative clause after a noun — not 'what'. "
+        "'What' is used for free relative clauses with no antecedent ('I know what you mean'). "
+        "E.g., 'the book that I read' or 'the car which I bought' — not 'the book what I read'.",
+
+    "Missing past participle":
+        "After 'have', 'has', or 'had', use the past participle form of the verb (often ending in -ed or an irregular form). "
+        "E.g., 'I have finished' (not 'have finish'), 'she has gone' (not 'has go'), "
+        "'they had eaten' (not 'had eat').",
+
     "Grammatical error (unclassified)":
         "This sentence may contain a grammatical error that couldn't be automatically identified.",
 }

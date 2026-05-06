@@ -162,7 +162,8 @@ def check_article_omission(doc) -> list[tuple[str, str]]:
 def check_wrong_article(doc) -> list[tuple[str, str]]:
     """
     Returns (type, article) pairs for a/an used where the is clearly needed —
-    when the noun has a relative clause or superlative modifier.
+    specifically when the noun has a superlative modifier ('a best solution').
+    Relative clauses are NOT flagged: 'a way that works' is often grammatically valid.
     """
     results = []
     for tok in doc:
@@ -171,9 +172,7 @@ def check_wrong_article(doc) -> list[tuple[str, str]]:
         head = tok.head
         if head.lemma_.lower() in UNCOUNTABLE_NOUNS:
             continue  # unnecessary article check handles these
-        has_relcl = any(c.dep_ == 'relcl' for c in head.children)
-        is_superl  = any(c.tag_ == 'JJS'   for c in head.children)
-        if has_relcl or is_superl:
+        if any(c.tag_ == 'JJS' for c in head.children):
             results.append((WRONG_ARTICLE, tok.text))
         elif any(c.tag_ == 'JJS' and c.dep_ == 'amod' for c in head.children):
             results.append((WRONG_ARTICLE, tok.text))
