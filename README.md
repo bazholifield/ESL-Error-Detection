@@ -91,13 +91,20 @@ The pipeline uses a threshold of **0.25** — lower than the F1-optimal value �
 The rule-based layer depends on spaCy's dependency parser, which loses accuracy on short, heavily ungrammatical sentences — exactly the kind this tool is meant to handle. A few categories of error are out of reach as a result:
 
 Errors that require context — tense mistakes with no explicit time marker, or word choice errors that depend on what the writer meant (e.g. peoples used to mean individual people rather than ethnic groups).
+
 Coreference — detecting a misused reflexive pronoun (myself instead of me) requires knowing what the pronoun refers to, which spaCy's parser doesn't resolve.
+
 Pragmatic/argument-structure errors — a missing preposition like "I was arguing the cashier" (should be arguing with) produces a syntactically valid parse, so there's no dependency signal to catch it.
+
 Dialect variation — some constructions are standard in one dialect and non-standard in another (e.g. on line vs. in line), so flagging them would produce false positives without knowing the writer's background.
+
 ## Future work
+
 The main planned direction is integrating this into a broader English practice app. Some specific things worth exploring:
 
 Suggested corrections — currently the tool flags errors and explains them, but doesn't offer a corrected version of the sentence.
+
 More error types — the rule set covers the most common patterns I observed in my students' writing, but there's plenty of room to expand it.
+
 Larger model — a sequence-labelling model (e.g. fine-tuned on token-level annotations) could replace the binary classifier + rule-based approach and handle errors that are currently out of reach.
 
